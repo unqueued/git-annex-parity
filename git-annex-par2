@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# set -x
+
+# For simplicity, avoiding parsing json for now, find seems adiquate
+
+# TODO: Should probably move into .git/annex/par2 or something
+
+GIT_DIR="$(git rev-parse --git-dir)"
+ANNEX_DIR="$GIT_DIR/annex"
+
+function par2_verify() {
+	git annex find --format='${hashdirmixed}${key}/${key} ${file}\n' --in=here "$@" | \
+		while read -r keypath file ; do
+			if [[ -f "$ANNEX_DIR/objects/$keypath.par2" ]]; then
+				par2verify -qq -- "$ANNEX_DIR/objects/$keypath.par2"
+				if [[ $? == 0 ]]; then
+					echo "$file OK"
+				else
+					echo "$file ERROR"
+				fi
+			fi
+		done
+}
+
+function par2_ls() {
+	git annex find --format='${hashdirmixed}${key}/${key} ${file}\n' --in=here "$@" | \
+		while read -r keypath file ; do
+			if [[ -f "$ANNEX_DIR/objects/$keypath.par2" ]]; then
+				echo "$file"
+			fi
+		done
+}
+
+function par2_drop() {
+	git annex find --format='${hashdirmixed}${key}\n' --in=here "$@" | \
+		while read -r keydir; do
+			if [[ -d "$ANNEX_DIR/objects/$keydir" ]]; then
+				chmod a+w "$ANNEX_DIR/objects/$keydir"
+				rm "$ANNEX_DIR/objects/$keydir/"*.par2
+				chmod a-w "$ANNEX_DIR/objects/$keydir"
+			fi
+		done
+}
+
+function par2_repair() {
+	git annex find --format='${hashdirmixed}${key}/${key} ${file}\n' --in=here "$@" | \
+		while read -r keypath file ; do
+			if [[ -f "$ANNEX_DIR/objects/$keypath.par2" ]]; then
+				chmod a+w "$(dirname "$ANNEX_DIR/objects/$keypath")"
+				par2repair -v -- "$ANNEX_DIR/objects/$keypath"
+				chmod a-w "$(dirname "$ANNEX_DIR/objects/$keypath")"
+			fi
+		done
+}
+
+function par2_create() {
+
+	# Probably want to have .git/annex/par2 instead...
+	# mkdir -p "$ANNEX_DIR/par2" || exit 1
+
+	git annex find --in=here "$@" | git annex lookupkey --batch | \
+		git annex examinekey --format='${hashdirmixed}${key}/${key}\n' --batch | \
+			while read -r keypath; do
+				if [[ ! -f "$ANNEX_DIR/objects/$keypath.par2" ]]; then
+					chmod a+w "$(dirname "$ANNEX_DIR/objects/$keypath")"
+					par2create -v -r5 -n1 "$ANNEX_DIR/objects/$keypath"
+					chmod a-w "$(dirname "$ANNEX_DIR/objects/$keypath")"
+				fi
+			done
+}
+
+function usage() {
+	echo "invalid options"
+	exit 1
+}
+
+if [[ $1 == "ls" ]]; then
+	shift
+	par2_ls "$@"
+elif [[ $1 == "create" ]]; then
+	shift
+	par2_create "$@"
+elif [[ $1 ==  "drop" ]]; then
+	shift
+	par2_drop "$@"
+elif [[ $1 == "verify" ]]; then
+	shift
+	par2_verify "$@"
+elif [[ $1 == "repair" ]]; then
+	shift
+	par2_repair "$@"
+else
+	usage
+fi
